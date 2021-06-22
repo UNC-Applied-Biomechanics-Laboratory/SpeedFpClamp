@@ -3,6 +3,9 @@ SpeedFpClamp Data Analysis
 Ricky Pimentel
 UNC Chapel Hill Applied Biomechanics Laboratory
 2021
+
+Run the script to perform data analysis and generate all article figures
+Data avaible at https://drive.google.com/file/d/1PrpgwxUbaDNYojghtbIORW3qLK66NI31/view?usp=sharing
 """
 
 import pandas as pd
@@ -13,10 +16,14 @@ import matplotlib as mpl
 import matplotlib.pyplot as plt
 import datetime as dt
 import scipy.io as sio
+import scipy.stats as stats
+import pingouin as pg
 
+# identify folder with data files - RENAME to your folder path!
 folder = r'E:\UNC_ABL\FpMetabolics_2020\MetData'
+
 files = os.listdir(folder)
-os.chdir(r'C:\Users\richa\Documents\python\SpeedFpClamp')
+os.chdir(folder)
 sty = 'seaborn'
 mpl.style.use(sty)
 
@@ -49,7 +56,6 @@ SubjNames = list(Subjects.keys())
 print(SubjNames)
 
 TrialAvg = {}
-
 v = plt.get_cmap('jet')
 cNorm  = mpl.colors.Normalize(vmin=0, vmax=len(Subjects))
 scalarMap = mpl.cm.ScalarMappable(norm=cNorm, cmap='jet')
@@ -223,20 +229,14 @@ for i in matching:
         
     del(StartInds[0])
     del(EndInds[-1])
-    
-    len(StartInds)
-    len(EndInds)
-    
     RestTime = []
     for i in range(len(StartInds)):
         starts = dt.datetime.combine(today, t[StartInds[i]])
         ends = dt.datetime.combine(today, t[EndInds[i]])
         NumSec = starts - ends
         RestTime.append(NumSec.seconds)
-    
+
     Subjects[s]['RestTime'] = RestTime
-    
-    
     
     
     # analyze each active trial individually
@@ -308,15 +308,11 @@ for i in matching:
 
     d = d+1
     
-    
+# change shape of output into NxCondition numpy array
 WAvg_S = np.reshape(AvgS, [len(Subjects), 5])
 WAvg_F = np.reshape(AvgF, [len(Subjects), 5])
 
-# TrialAvg['Trial_S_VO2net'] = np.mean(AvgS,axis=0)
-# TrialAvg['Trial_S_VO2net_sd'] = np.std(AvgS,axis=0)
-# TrialAvg['Trial_F_VO2net'] = np.mean(AvgF,axis=0)
-# TrialAvg['Trial_F_VO2net_sd'] = np.std(AvgF,axis=0)
-
+# calculate averages
 TrialAvg['Trial_S_Wnet'] = np.mean(AvgF,axis=0)
 TrialAvg['Trial_S_Wnet_sd'] = np.std(AvgF,axis=0)
 TrialAvg['Trial_F_Wnet'] = np.mean(AvgF,axis=0)
@@ -443,36 +439,39 @@ for i in matching:
         Data['F_AvgSpd'] = AvgSpd_array
         Data['F_Target'] = FpTarget
         
-        # analyze speed targeting trial       
+        
+        # analyze speed targeting trial   
+        SpdData = {}
+        SpdData['S_Time'] = MAT['NewSpeedTarget'][Cond]['Data'][:]['Time'].tolist()       
+        SpdData['S_Fp'] = MAT['NewSpeedTarget'][Cond]['Data'][:]['MeanPeakFp'].tolist()
+        
+        
         Data['S_AvgFp'] = MAT['SpeedTarget'][Cond]['FpData']['Mean']
         Data['S_AvgSpd'] = MAT['SpeedTarget'][Cond]['Speed']
         
-        return Data
+        return Data, SpdData
      
         
-    DataM20 = SpdAnalysis(0, MAT, 'blue')
-    DataM10 = SpdAnalysis(1, MAT, 'cornflowerblue')
-    DataNorm = SpdAnalysis(2, MAT, 'black')
-    DataP10 = SpdAnalysis(3, MAT, 'orange')
-    DataP20 = SpdAnalysis(4, MAT, 'orangered')
+    DataM20, SpdDataM20 = SpdAnalysis(0, MAT, 'blue')
+    DataM10, SpdDataM10 = SpdAnalysis(1, MAT, 'cornflowerblue')
+    DataNorm, SpdDataNorm = SpdAnalysis(2, MAT, 'black')
+    DataP10, SpdDataP10 = SpdAnalysis(3, MAT, 'orange')
+    DataP20, SpdDataP20 = SpdAnalysis(4, MAT, 'orangered')
     
-    # plt.ylabel('Speed (m/s)')
-    # plt.xlabel('Time (s)')
-    
-    # plt.title(Subj + ' Self Paced Targeting Speed Fp')
-    
-    # plt.show()
-    # fname = Subj + '_Speed.jpg'
-    # plt.savefig(fname, dpi=300)
-    # plt.close()
     
     SubjData.update({s+'M20': DataM20, 
                 s+'M10': DataM10, 
                 s+'Norm': DataNorm, 
                 s+'P10': DataP10, 
-                s+'P20': DataP20})
+                s+'P20': DataP20, 
+                s+'SpdM20': SpdDataM20, 
+                s+'SpdM10': SpdDataM10, 
+                s+'SpdNorm': SpdDataNorm, 
+                s+'SpdP10': SpdDataP10, 
+                s+'SpdP20': SpdDataP20})
 
 del DataM20, DataM10, DataNorm, DataP10, DataP20, Dict, MAT, F
+del SpdDataM20, SpdDataM10, SpdDataNorm, SpdDataP10, SpdDataP20
 
 
 #%% Sampling Frequency Analysis
@@ -487,13 +486,84 @@ SamplingStd = np.std(SampFreq)
 print('Avg Sampling Intermission = ' + str(SamplingMean))
 print('Std Sampling Intermission = ' + str(SamplingStd))
 
-#%% Plot Fps
+#%% Plot Fps during Speed Clamp
 sty = 'default'
 mpl.style.use(sty)
 plt.close('all')
-plt.rcParams.update({'font.size': 20})
+fnt = 16
+plt.rcParams.update({'font.size': fnt})
 fig = plt.figure(figsize=[20,10])
-ax = plt.subplot(122)
+# ax = plt.subplot(131)
+ax = plt.axes((0.06, 0.075, 0.27, 0.75))
+from matplotlib.patches import Rectangle
+Levels = ['M20', 'M10', 'Norm', 'P10', 'P20']
+Lvl = ['-20%', '-10%', 'Norm', '+10%', '+20%']
+Colors = [mpl._color_data.CSS4_COLORS['blue'], 
+          mpl._color_data.CSS4_COLORS['cornflowerblue'], 
+          mpl._color_data.CSS4_COLORS['black'],
+          mpl._color_data.CSS4_COLORS['orange'], 
+          mpl._color_data.CSS4_COLORS['orangered']]
+A1 = 0.15
+A2 = 1
+LW1 = 2
+LW2 = 2
+counter = 0
+SubjFps = np.zeros([len(SubjNamez), 5])
+    
+for s in SubjNamez:
+    for t in [0, 1, 2, 3, 4]:
+    # calculate targeting accuracy
+        Time = SubjData[s+'Spd'+Levels[t]]['S_Time']
+        NormTarget = SubjData[s+'Norm']['F_Target'][2]
+        TrlFp = SubjData[s+'Spd'+Levels[t]]['S_Fp']
+        Fp = list(filter(None, TrlFp))
+        Ind = TrlFp.index(Fp[0])
+        
+        plt.plot(Time[Ind:], Fp/NormTarget, 
+                  c=Colors[t], alpha=A1)
+        
+         # get average Fp over final 2 min
+        Final2Min = [x for x in Time if x >= 180]
+        a = Time.index(Final2Min[0])
+        b = len(Time)
+        AvgFp = np.ones(len(TrlFp[a:b])) * np.mean(TrlFp[a:b])
+        
+        SubjFps[counter, t] = AvgFp[0] / NormTarget
+    counter = counter + 1
+    
+for i in range(5):
+    ax.add_patch(Rectangle(((180,np.mean(SubjFps[:,i])-0.025)), 120, 0.05,
+              edgecolor = Colors[i],
+              facecolor = Colors[i],
+              alpha = A2,
+              fill=True, lw=0))
+    val = int(np.mean(SubjFps[:,i])*100)
+    font = mpl.font_manager.FontProperties()
+    font.set_weight('bold')
+    font.set_size(fnt)
+    plt.text(240, np.mean(SubjFps[:,i]), 
+              Lvl[i] + ' Avg: ' + str(val) + '%', 
+              va='center', ha='center', c='w', 
+              fontproperties=font)
+    
+plt.axvline(x = 180, color='k', lw=2)
+plt.text(240, 0.62, 'Final 2 Minutes', c='k', 
+         fontsize=fnt, ha='center')
+plt.xlim([0, 300])
+plt.ylim([0.6, 1.4])
+ax.set_xticks([0, 100, 200, 300])
+ax.set_yticks([0.6, 0.7, 0.8, 0.9, 1, 1.1, 1.2, 1.3, 1.4])
+ax.set_yticklabels(['60%', '70%', '80%', '90%', '100%',
+                  '110%', '120%', '130%', '140%'])
+
+plt.xlabel('Time(s)')
+plt.ylabel('Relative Fp')
+plt.title('Fp during Speed Clamp')
+plt.text(-25, 1.42, 'A', fontsize=30)
+
+#%% Plot Fps during Fp Clamp
+# ax = plt.subplot(132)
+ax = plt.axes((0.39, 0.075, 0.27, 0.75))
 from matplotlib.patches import Rectangle
 Levels = ['M20', 'M10', 'Norm', 'P10', 'P20']
 Lvl = ['-20%', '-10%', 'Norm', '+10%', '+20%']
@@ -524,13 +594,9 @@ for s in SubjNamez:
         TrlFp = SubjData[s+Levels[t]]['F_Fp'].values.tolist() 
         Fp = list(filter(None, TrlFp))
         Ind = TrlFp.index(Fp[0])
-        
        
         plt.plot(Time[Ind:], Fp/NormTarget, 
                   c=Colors[t], alpha=A1)
-        # FiltFp = MovingAvg(Fp, 51)
-        # plt.plot(Time[Ind:], FiltFp/NormTarget, 
-        #          c=Colors[t], alpha=A1)
         
          # get average Fp over final 2 min
         Final2Min = [x for x in Time if x >= 180]
@@ -550,24 +616,25 @@ for i in range(5):
     val = int(np.mean(SubjFps[:,i])*100)
     font = mpl.font_manager.FontProperties()
     font.set_weight('bold')
-    font.set_size(15)
+    font.set_size(fnt)
     plt.text(240, np.mean(SubjFps[:,i]), 
-              Lvl[i] + ' Trial Avg: ' + str(val) + '%', 
+              Lvl[i] + ' Avg: ' + str(val) + '%', 
               va='center', ha='center', c='w', 
               fontproperties=font)
     
 plt.axvline(x = 180, color='k', lw=2)
 plt.text(240, 0.62, 'Final 2 Minutes', c='k', 
-         fontsize=20, ha='center')
+         fontsize=fnt, ha='center')
 plt.xlim([0, 300])
 plt.ylim([0.6, 1.4])
-
+ax.set_xticks([0, 100, 200, 300])
 ax.set_yticks([0.6, 0.7, 0.8, 0.9, 1, 1.1, 1.2, 1.3, 1.4])
 ax.set_yticklabels(['60%', '70%', '80%', '90%', '100%',
                   '110%', '120%', '130%', '140%'])
 
 plt.xlabel('Time(s)')
 plt.ylabel('Relative Fp')
+plt.title('Fp during Fp Clamp')
 plt.text(-25, 1.42, 'B', fontsize=30)
 
 #%% Plot General Speeds
@@ -580,12 +647,9 @@ Colors = [mpl._color_data.CSS4_COLORS['blue'],
           mpl._color_data.CSS4_COLORS['orange'], 
           mpl._color_data.CSS4_COLORS['orangered']]
 
-# plt.close('all')
-plt.rcParams.update({'font.size': 20})
-# fig = plt.figure(figsize=[10,10])
-# ax = fig.add_axes([0.1, 0.1, 0.8, 0.8])
-ax = plt.subplot(121)
-A1 = 0.25
+# ax = plt.subplot(133)
+ax = plt.axes((0.72, 0.075, 0.27, 0.75))
+A1 = 0.3
 A2 = 1
 LW1 = 2
 LW2 = 2
@@ -602,11 +666,7 @@ for s in SubjNamez:
         # plot individual speed lines for final 4 min
         time = SubjData[s+Levels[t]]['F_Time'].to_list()
         TrlSpd = SubjData[s+Levels[t]]['F_Spd'].values / NormSpeed
-        # Final4Min = [x for x in time if x >= 60]
-        # a = time.index(Final4Min[0])
-        # b = len(time)
-        # plt.plot(time[a:b], TrlSpd[a:b], lw=LW1,
-        #          c=Colors[t], alpha=A1)
+
         plt.plot(time, TrlSpd, lw=LW1,
                  c=Colors[t], alpha=A1)
         
@@ -615,8 +675,6 @@ for s in SubjNamez:
         a = time.index(Final2Min[0])
         b = len(time)
         AvgSpd = np.ones(len(TrlSpd[a:b])) * np.mean(TrlSpd[a:b])
-        # plt.plot(time[a:b], AvgSpd, '--', lw=LW2,
-        #          c=Colors[t], alpha=A2)
         SubjSpds[counter, t] = AvgSpd[0]
     counter = counter + 1
 
@@ -629,26 +687,26 @@ for i in range(5):
     val = int(np.mean(SubjSpds[:,i])*100)
     font = mpl.font_manager.FontProperties()
     font.set_weight('bold')
-    font.set_size(15)
+    font.set_size(fnt)
     plt.text(240, np.mean(SubjSpds[:,i]), 
-             Lvl[i] + ' Trial Avg: ' + str(val) + '%', 
+             Lvl[i] + ' Avg: ' + str(val) + '%', 
              va='center', ha='center', c='w', 
              fontproperties=font)
     
-
 plt.axvline(x = 180, color='k', lw=2)
 plt.text(240, 0.62, 'Final 2 Minutes', c='k', 
-         fontsize=20, ha='center')
+         fontsize=fnt, ha='center')
 plt.xlim([0, 300])
 plt.ylim([0.6, 1.4])
-
+ax.set_xticks([0, 100, 200, 300])
 ax.set_yticks([0.6, 0.7, 0.8, 0.9, 1, 1.1, 1.2, 1.3, 1.4])
 ax.set_yticklabels(['60%', '70%', '80%', '90%', '100%',
                   '110%', '120%', '130%', '140%'])
 
 plt.xlabel('Time(s)')
 plt.ylabel('Relative Walking Speed')
-plt.text(-25, 1.42, 'A', fontsize=30)
+plt.text(-25, 1.42, 'C', fontsize=30)
+plt.title('Walking Speed during Fp Clamp')
 
 plt.savefig('BiofeedbackPerformance.jpg', dpi=300)
 plt.savefig('BiofeedbackPerformance.pdf', dpi=300)
@@ -1002,9 +1060,6 @@ ax4.tick_params(axis='x', labelsize=15)
 
 
 #%% Run stats and add to plot
-from statsmodels.stats.anova import AnovaRM
-from statsmodels.stats.multicomp import pairwise_tukeyhsd as Tukeys
-# import scipy.stats as stats
 S = range(1,len(Subjects)+1)
 Ones = np.ones(5)
 fnt = 12
@@ -1021,45 +1076,72 @@ RMA = pd.DataFrame({'subjects': np.tile(np.repeat(S, len(X)), 2),
                                      [len(Subjects)*2*5, 1][0])}
                     )
 
-#perform the repeated measures ANOVA
-print('Speeds')
-print(AnovaRM(data=RMA, depvar='speed', subject='subjects', 
-              within=['condition', 'clamp']).fit())
+AnovaNames = ['speed', 'Fp', 'MetCost', 'CoT']
+aov = {}
+for A in AnovaNames:
+    aov[A] = pg.rm_anova(data=RMA, dv=A, within=['condition', 'clamp'], subject='subjects', detailed=True)
+    print('\n\n' + A + '\n')
+    print('P values: ')
+    print(aov[A]['p-unc'])
+    print('Partial Eta Sq: ')
+    print(aov[A]['np2'])
+    
 
 #perform the repeated measures ANOVA
-print('Fps')
-print(AnovaRM(data=RMA, depvar='Fp', subject='subjects', 
-              within=['condition', 'clamp']).fit())
+# print('Speeds')
+# print(AnovaRM(data=RMA, depvar='speed', subject='subjects', 
+#               within=['condition', 'clamp']).fit())
+# AnovaRM(data=RMA, depvar='speed', subject='subjects', 
+#               within=['condition', 'clamp'])
 
-# Met Cost repeated measures ANOVA
-print('MetCost')
-print(AnovaRM(data=RMA, depvar='MetCost', subject='subjects', 
-              within=['condition', 'clamp']).fit())
 
-# CoT repeated measures ANOVA
-print('CoT')
-print(AnovaRM(data=RMA, depvar='CoT', subject='subjects', 
-              within=['condition', 'clamp']).fit())
+# #perform the repeated measures ANOVA
+# print('Fps')
+# print(AnovaRM(data=RMA, depvar='Fp', subject='subjects', 
+#               within=['condition', 'clamp']).fit())
 
-#%%
-ax1.text(4.3, 1.15,'condition'+'\n'+'clamp'+'\n'+'condition x clamp', 
+# # Met Cost repeated measures ANOVA
+# print('MetCost')
+# print(AnovaRM(data=RMA, depvar='MetCost', subject='subjects', 
+#               within=['condition', 'clamp']).fit())
+
+# # CoT repeated measures ANOVA
+# print('CoT')
+# print(AnovaRM(data=RMA, depvar='CoT', subject='subjects', 
+#               within=['condition', 'clamp']).fit())
+
+# place ANOVA values in fig
+ax1.text(3.8, 1.15,'condition'+'\n'+'clamp'+'\n'+'condition x clamp', 
          va='top', fontsize = fnt, ha='right')
-ax1.text(4.5, 1.19,'     p'+'\n'+'<0.001'+'\n'+'  0.006'+'\n'+'<0.001', 
+ax1.text(4.0, 1.19,'     p'+'\n'+'<0.001'+'\n'+'  0.004'+'\n'+'<0.001', 
+         va='top', fontsize = fnt, ha='left')
+np2 = np.round(aov['speed']['np2'].to_list(), 3)
+ax1.text(4.75, 1.225,'    $\eta^2_p$\n'+str(np2[0])+'\n'+str(np2[1])+'\n'+str(np2[2]), 
          va='top', fontsize = fnt, ha='left')
 
-ax2.text(4.3, 15.3,'condition'+'\n'+'clamp'+'\n'+'condition x clamp', 
+
+ax2.text(3.8, 17.4,'condition'+'\n'+'clamp'+'\n'+'condition x clamp', 
          va='top', fontsize = fnt, ha='right')
-ax2.text(4.5, 16,'     p'+'\n'+'<0.001'+'\n'+'<0.001'+'\n'+'<0.001', 
+ax2.text(4, 18,'     p'+'\n'+'<0.001'+'\n'+'  0.001'+'\n'+'<0.001', 
+         va='top', fontsize = fnt, ha='left')
+np2 = np.round(aov['Fp']['np2'].to_list(), 3)
+ax2.text(4.75, 18.5,'    $\eta^2_p$\n'+str(np2[0])+'\n'+str(np2[1])+'\n'+str(np2[2]), 
          va='top', fontsize = fnt, ha='left')
 
-ax3.text(4.3, 1.7,'condition'+'\n'+'clamp'+'\n'+'condition x clamp', 
+ax3.text(3.8, 1.675,'condition'+'\n'+'clamp'+'\n'+'condition x clamp', 
           va='top', fontsize = fnt, ha='right')
-ax3.text(4.5, 2,'     p'+'\n'+'<0.001'+'\n'+'  0.002'+'\n'+'  0.126', 
+ax3.text(4, 2,'     p'+'\n'+'<0.001'+'\n'+'  0.002'+'\n'+'  0.126', 
           va='top', fontsize = fnt, ha='left')
+np2 = np.round(aov['MetCost']['np2'].to_list(), 3)
+ax3.text(4.75, 2.325,'    $\eta^2_p$\n'+str(np2[0])+'\n'+str(np2[1])+'\n'+str(np2[2]), 
+         va='top', fontsize = fnt, ha='left')
 
-ax4.text(4.3, 1.8,'condition'+'\n'+'clamp'+'\n'+'condition x clamp', 
+ax4.text(3.8, 1.8,'condition'+'\n'+'clamp'+'\n'+'condition x clamp', 
          va='top', fontsize = fnt, ha='right')
-ax4.text(4.5, 2,'     p'+'\n'+'<0.001'+'\n'+'  0.010'+'\n'+'  0.319', 
+ax4.text(4, 2,'     p'+'\n'+'<0.001'+'\n'+'  0.010'+'\n'+'  0.313', 
+         va='top', fontsize = fnt, ha='left')
+np2 = np.round(aov['CoT']['np2'].to_list(), 3)
+ax4.text(4.75, 2.175,'    $\eta^2_p$\n'+str(np2[0])+'\n'+str(np2[1])+'\n'+str(np2[2]), 
          va='top', fontsize = fnt, ha='left')
 
 #%% Post hoc T-tests
@@ -1070,165 +1152,239 @@ Hash = 18
 # test across conditions
 T_SCondSpeed = np.ones(5)
 T_FCondSpeed = np.ones(5)
-Groups = np.array([np.ones(20), 2*np.ones(20)]).reshape(40)
+ES_SCondSpeed = np.ones(5)
+ES_FCondSpeed = np.ones(5)
+G = np.array([np.ones(20), 2*np.ones(20)]).reshape([40, 1])
 for x in [0, 1, 3, 4]:
-    # T_SCondSpeed[x] = stats.ttest_rel(AllSpd_S[:,x], AllSpd_S[:,2]).pvalue   # Fishers
-    d = np.reshape([AllSpd_S[:,x], AllSpd_S[:,2]], 40)
-    T_SCondSpeed[x] = Tukeys(d, Groups).pvalues   # tukeys
+    d = np.reshape([AllSpd_S[:,x], AllSpd_S[:,2]], [40, 1])
+    D = pd.DataFrame(np.hstack([d,G]), columns=['X','G'])
+    Stats = pg.pairwise_tukey(D, dv='X', between='G', effsize='eta-square')
+    T_SCondSpeed[x] = float(Stats['p-tukey'])
+    ES_SCondSpeed[x] = float(Stats['eta-square'])
     if T_SCondSpeed[x] < 0.05 :
         ax1.text(x+1-BarOfst, np.mean(AllSpd_S[:,x])+0.18, '*', 
                  c = Colors[x], fontsize=Ast, ha='center')
         
-    # T_FCondSpeed[x] = stats.ttest_rel(AllSpd_F[:,x], AllSpd_F[:,2]).pvalue   
-    d = np.reshape([AllSpd_F[:,x], AllSpd_F[:,2]], 40)
-    T_FCondSpeed[x] =Tukeys(d, Groups).pvalues   # tukeys
+    d = np.reshape([AllSpd_F[:,x], AllSpd_F[:,2]], [40, 1])
+    D = pd.DataFrame(np.hstack([d,G]), columns=['X','G'])
+    Stats = pg.pairwise_tukey(D, dv='X', between='G', effsize='eta-square')
+    T_FCondSpeed[x] = float(Stats['p-tukey'])
+    ES_FCondSpeed[x] = float(Stats['eta-square'])
     if T_FCondSpeed[x] < 0.05 :
         ax1.text(x+1+BarOfst, np.mean(AllSpd_F[:,x])+0.18, '*', 
                  c = Colors[x], fontsize=Ast, ha='center')
         
-print('Speed Speed Conditions Post Hoc')
+    
+print('\nSpeed Speed Conditions Post Hoc')
+print('p-values')
 print(T_SCondSpeed)
+print('effect sizes')
+print(np.round(ES_SCondSpeed, decimals=5))
 print('Speed Fp Conditions Post Hoc')
+print('p-values')
 print(np.round(T_FCondSpeed, decimals=5))
+print('effect sizes')
+print(np.round(ES_FCondSpeed, decimals=5))
 
 # between clamps
 T_Speed = np.ones(5)
+ES_Speed = np.ones(5)
 for x in range(5):
-    # T_Speed[x] = stats.ttest_rel(AllSpd_S[:,x], AllSpd_F[:,x]).pvalue    
-    d = np.reshape([AllSpd_S[:,x], AllSpd_F[:,x]], 40)
-    T_Speed[x] =Tukeys(d, Groups).pvalues   # tukeys
+    d = np.reshape([AllSpd_S[:,x], AllSpd_F[:,x]], [40, 1])
+    D = pd.DataFrame(np.hstack([d,G]), columns=['X','G'])
+    Stats = pg.pairwise_tukey(D, dv='X', between='G', effsize='eta-square')
+    T_Speed[x] = float(Stats['p-tukey'])
+    ES_Speed[x] = float(Stats['eta-square'])
     if T_Speed[x] < 0.05 :
         y = np.mean([np.mean(AllSpd_S[:,x], axis=0), np.mean(AllSpd_F[:,x], axis=0)])
         ax1.text(x+1, y+0.2, '#', 
                  c = Colors[x], fontsize=Hash, ha='center')
 
 print('Speed Between Clamp Post Hoc')
+print('p-values')
 print(np.round(T_Speed, decimals=5))
+print('effect sizes')
+print(np.round(ES_Speed, decimals=5))
 print(' ')
-
-np.mean(AllSpd_S, 0) - np.mean(AllSpd_F, 0)
+print(' ')
         
 # Fp sub-analysis
 # between conditions
 T_SCondFp = np.ones(5)
 T_FCondFp = np.ones(5)
+ES_SCondFp = np.ones(5)
+ES_FCondFp = np.ones(5)
 for x in [0, 1, 3, 4]:
-    # T_SCondFp[x] = stats.ttest_rel(AllFp_S_kg[:,x]*9.81, AllFp_S_kg[:,2]*9.81).pvalue    
-    d = np.reshape([AllFp_S_kg[:,x]*9.81, AllFp_S_kg[:,2]*9.81], 40)
-    T_SCondFp[x] =Tukeys(d, Groups).pvalues   # tukeys
+    d = np.reshape([AllFp_S_kg[:,x]*9.81, AllFp_S_kg[:,2]*9.81], [40, 1])
+    D = pd.DataFrame(np.hstack([d,G]), columns=['X','G'])
+    Stats = pg.pairwise_tukey(D, dv='X', between='G', effsize='eta-square')
+    T_SCondFp[x] = float(Stats['p-tukey'])
+    ES_SCondFp[x] = float(Stats['eta-square'])
     if T_SCondFp[x] < 0.05 :
         ax2.text(x+1-BarOfst, np.mean(AllFp_S_kg[:,x]*9.81)+2.5, '*', 
                  c = Colors[x], fontsize=Ast, ha='center')
-    
-    # T_FCondFp[x] = stats.ttest_rel(AllFp_F_kg[:,x]*9.81, AllFp_F_kg[:,2]*9.81).pvalue
-    d = np.reshape([AllFp_F_kg[:,x]*9.81, AllFp_F_kg[:,2]*9.81], 40)
-    T_FCondFp[x] =Tukeys(d, Groups).pvalues   # tukeys    
+
+    d = np.reshape([AllFp_F_kg[:,x]*9.81, AllFp_F_kg[:,2]*9.81], [40, 1]) 
+    D = pd.DataFrame(np.hstack([d,G]), columns=['X','G'])
+    Stats = pg.pairwise_tukey(D, dv='X', between='G', effsize='eta-square')
+    T_FCondFp[x] = float(Stats['p-tukey'])
+    ES_FCondFp[x] = float(Stats['eta-square'])
     if T_FCondFp[x] < 0.05 :
         ax2.text(x+1+BarOfst, np.mean(AllFp_F_kg[:,x]*9.81, axis=0)+2.5, '*', 
                  c = Colors[x], fontsize=Ast, ha='center')
         
 print('Fp Speed Conditions Post Hoc')
-print(np.round(T_SCondFp, decimals=5))
+print('p-values')
+print(T_SCondFp)
+print('effect sizes')
+print(np.round(ES_SCondFp, decimals=5))
 print('Fp Fp Conditions Post Hoc')
-print(np.round(T_FCondFp, decimals=5))
+print('p-values')
+print(T_FCondFp)
+print('effect sizes')
+print(np.round(ES_FCondFp, decimals=5))
 
 # between clamps
 T_Fp = np.ones(5)
+ES_Fp = np.ones(5)
 for x in range(5):
-    # A = stats.ttest_rel(AllFp_S_kg[:,x]*9.81, AllFp_F_kg[:,x]*9.81)
-    # T_Fp[x] = A.pvalue
-    d = np.reshape([AllFp_S_kg[:,x]*9.81, AllFp_F_kg[:,x]*9.81], 40)
-    T_Fp[x] =Tukeys(d, Groups).pvalues   # tukeys
+    d = np.reshape([AllFp_S_kg[:,x]*9.81, AllFp_F_kg[:,x]*9.81], [40, 1])
+    D = pd.DataFrame(np.hstack([d,G]), columns=['X','G'])
+    Stats = pg.pairwise_tukey(D, dv='X', between='G', effsize='eta-square')
+    T_Fp[x] = float(Stats['p-tukey'])
+    ES_Fp[x] = float(Stats['eta-square'])
     if T_Fp[x] < 0.05 :
         y = np.mean([np.mean(AllFp_S_kg[:,x]*9.81, axis=0), 
                      np.mean(AllFp_F_kg[:,x]*9.81, axis=0)])
         ax2.text(x, y+3, '#', c = Colors[x], fontsize=Hash, ha='center')
 print('Fp Between Clamp Post Hoc')
-print(np.round(T_Fp, decimals=5))
+print('p-values')
+print(np.round(T_Speed, decimals=5))
+print('effect sizes')
+print(np.round(ES_Speed, decimals=5))
+print(' ')
 print(' ')
 
 # MetCost sub-analysis
 # between conditions
 T_SCondMetCost = np.ones(5)
 T_FCondMetCost = np.ones(5)
-for x in range(5):
-    # T_SCondMetCost[x] = stats.ttest_rel(WAvg_S[:,x], WAvg_S[:,2]).pvalue   
-    d = np.reshape([WAvg_S[:,x], WAvg_S[:,2]], 40)
-    T_SCondMetCost[x] =Tukeys(d, Groups).pvalues   # tukeys    
+ES_SCondMetCost = np.ones(5)
+ES_FCondMetCost = np.ones(5)
+for x in range(5): 
+    d = np.reshape([WAvg_S[:,x], WAvg_S[:,2]], [40, 1])
+    D = pd.DataFrame(np.hstack([d,G]), columns=['X','G'])
+    Stats = pg.pairwise_tukey(D, dv='X', between='G', effsize='eta-square')
+    T_SCondMetCost[x] = float(Stats['p-tukey'])
+    ES_SCondMetCost[x] = float(Stats['eta-square'])
     if T_SCondMetCost[x] < 0.05 :
         ax3.text(x+1-BarOfst, np.mean(WAvg_S[:,x], axis=0)+1.5,
                  '*', c = Colors[x], fontsize=Ast, ha='center')
     
-    # T_FCondMetCost[x] = stats.ttest_rel(WAvg_F[:,x], WAvg_F[:,2]).pvalue   
-    d = np.reshape([WAvg_F[:,x], WAvg_F[:,2]], 40)
-    T_FCondMetCost[x] =Tukeys(d, Groups).pvalues   # tukeys    
+    d = np.reshape([WAvg_F[:,x], WAvg_F[:,2]], [40, 1]) 
+    D = pd.DataFrame(np.hstack([d,G]), columns=['X','G'])
+    Stats = pg.pairwise_tukey(D, dv='X', between='G', effsize='eta-square')
+    T_FCondMetCost[x] = float(Stats['p-tukey'])
+    ES_FCondMetCost[x] = float(Stats['eta-square'])
     if T_FCondMetCost[x] < 0.05 :
         ax3.text(x+1+BarOfst, np.mean(WAvg_F[:,x], axis=0)+1.5, 
                  '*', c = Colors[x], fontsize=Ast, ha='center')
         
 print('MetCost Speed Conditions Post Hoc')
-print(np.round(T_SCondMetCost, decimals=5))
+print('p-values')
+print(T_SCondMetCost)
+print('effect sizes')
+print(np.round(ES_SCondMetCost, decimals=5))
 print('MetCost Conditions Post Hoc')
-print(np.round(T_FCondMetCost, decimals=5))
+print('p-values')
+print(T_FCondMetCost)
+print('effect sizes')
+print(np.round(ES_FCondMetCost, decimals=5))
+
+# post hoc difference in net metabolic cost for lowest condition intensity
+# np.mean([WAvg_F[:,0]]) - np.mean([WAvg_S[:,0]])
 
 # between clamps
 T_MetCost = np.ones(5)
+ES_MetCost = np.ones(5)
 for x in range(5):
-    # T_MetCost[x] = stats.ttest_rel(WAvg_S[:,x], WAvg_F[:,x]).pvalue
-    d = np.reshape([WAvg_S[:,x], WAvg_F[:,x]], 40)
-    T_MetCost[x] =Tukeys(d, Groups).pvalues   # tukeys    
+    d = np.reshape([WAvg_S[:,x], WAvg_F[:,x]], [40, 1])    
+    D = pd.DataFrame(np.hstack([d,G]), columns=['X','G'])
+    Stats = pg.pairwise_tukey(D, dv='X', between='G', effsize='eta-square')
+    T_MetCost[x] = float(Stats['p-tukey'])
+    ES_MetCost[x] = float(Stats['eta-square'])
     if T_MetCost[x] < 0.05 :
         y = np.mean([np.mean(WAvg_S[:,x], axis=0), 
                      np.mean(WAvg_F[:,x], axis=0)])
-        # x_ = np.mean([np.mean(AllFp_S_kg[:,x]*9.81, axis=0), 
-        #               np.mean(AllFp_F_kg[:,x]*9.81, axis=0)])
         ax3.text(x+1, y+1.7, '#', 
                  c = Colors[x], fontsize=Hash, ha='center')
 
 print('MetCost Between Clamp Post Hoc')
-print(np.round(T_MetCost, decimals=5))   
+print('p-values')
+print(np.round(T_MetCost, decimals=5))
+print('effect sizes')
+print(np.round(ES_MetCost, decimals=5))
+print(' ')
 print(' ')
 
 # CoT sub-analysis
 # between conditions
 T_SCondCoT = np.ones(5)
 T_FCondCoT = np.ones(5)
+ES_SCondCoT = np.ones(5)
+ES_FCondCoT = np.ones(5)
 for x in range(5):
-    # T_SCondCoT[x] = stats.ttest_rel(CoT_Fp_S[:,x], CoT_Fp_S[:,2]).pvalue   
-    d = np.reshape([CoT_Fp_S[:,x], CoT_Fp_S[:,2]], 40)
-    T_SCondCoT[x] =Tukeys(d, Groups).pvalues   # tukeys    
+    d = np.reshape([CoT_Fp_S[:,x], CoT_Fp_S[:,2]], [40, 1]) 
+    D = pd.DataFrame(np.hstack([d,G]), columns=['X','G'])
+    Stats = pg.pairwise_tukey(D, dv='X', between='G', effsize='eta-square')
+    T_SCondCoT[x] = float(Stats['p-tukey'])
+    ES_SCondCoT[x] = float(Stats['eta-square'])
     if T_SCondCoT[x] < 0.05 :
         ax4.text(x+1-BarOfst, np.mean(CoT_Fp_S[:,x], axis=0)+1,
                  '*', c = Colors[x], fontsize=Ast, ha='center')
     
-    # T_FCondCoT[x] = stats.ttest_rel(CoT_Fp_F[:,x], CoT_Fp_F[:,2]).pvalue 
-    d = np.reshape([CoT_Fp_F[:,x], CoT_Fp_F[:,2]], 40)
-    T_FCondCoT[x] =Tukeys(d, Groups).pvalues   # tukeys    
+    d = np.reshape([CoT_Fp_F[:,x], CoT_Fp_F[:,2]], [40, 1]) 
+    D = pd.DataFrame(np.hstack([d,G]), columns=['X','G'])
+    Stats = pg.pairwise_tukey(D, dv='X', between='G', effsize='eta-square')
+    T_FCondCoT[x] = float(Stats['p-tukey'])
+    ES_FCondCoT[x] = float(Stats['eta-square'])
     if T_FCondCoT[x] < 0.05 :
         ax4.text(x+1+BarOfst, np.mean(CoT_Fp_F[:,x], axis=0)+1, 
                  '*', c = Colors[x], fontsize=Ast, ha='center')
         
 print('CoT Speed Conditions Post Hoc')
-print(np.round(T_SCondCoT, decimals=5))
+print('p-values')
+print(T_SCondCoT)
+print('effect sizes')
+print(np.round(ES_SCondCoT, decimals=5))
 print('CoT Fp Conditions Post Hoc')
-print(np.round(T_FCondCoT, decimals=5))
+print('p-values')
+print(T_FCondCoT)
+print('effect sizes')
+print(np.round(ES_FCondCoT, decimals=5))
 
 # between clamps
 T_CoT = np.ones(5)
+ES_CoT = np.ones(5)
 for x in range(5):
-    # T_CoT[x] = stats.ttest_rel(CoT_Fp_S[:,x], CoT_Fp_F[:,x]).pvalue
-    d = np.reshape([CoT_Fp_S[:,x], CoT_Fp_F[:,x]], 40)
-    T_CoT[x] =Tukeys(d, Groups).pvalues   # tukeys    
+    d = np.reshape([CoT_Fp_S[:,x], CoT_Fp_F[:,x]], [40, 1])
+    D = pd.DataFrame(np.hstack([d,G]), columns=['X','G'])
+    Stats = pg.pairwise_tukey(D, dv='X', between='G', effsize='eta-square')
+    T_CoT[x] = float(Stats['p-tukey'])
+    ES_CoT[x] = float(Stats['eta-square'])
     if T_CoT[x] < 0.05 :
         y = np.mean([np.mean(CoT_Fp_S[:,x], axis=0), 
                      np.mean(CoT_Fp_F[:,x], axis=0)])
-        # x_ = np.mean([np.mean(AllFp_S_kg[:,x]*9.81, axis=0), 
-        #               np.mean(AllFp_F_kg[:,x]*9.81, axis=0)])
         ax4.text(x+1, y+1.1, '#', 
                  c = Colors[x], fontsize=Hash, ha='center')
 
 print('CoT Between Clamp Post Hoc')
-print(np.round(T_CoT, decimals=5))    
+print('p-values')
+print(np.round(T_CoT, decimals=5))
+print('effect sizes')
+print(np.round(ES_CoT, decimals=5))
+print(' ')
+print(' ')   
 
 plt.savefig('Clamps.png', dpi=300)
 plt.savefig('Clamps.pdf', dpi=300)
@@ -1240,8 +1396,7 @@ sz = 50
 sz2 = 100
 A = 0.4
 fnt = 15
-txt = 13.5
-
+txt = 13
 
 # speed by Fp
 plt1 = plt.subplot(231)
@@ -1258,12 +1413,14 @@ x = np.linspace(np.min(AllSpd_S), np.max(AllSpd_S), 25)
 plt1.scatter(x,p_S(x)*9.81,c='k',marker='o', s=sz2, alpha = A)
 plt1.plot(x,p_S(x)*9.81,'-k')
 # the line equation and R
-C_S = np.corrcoef(np.hstack(AllSpd_S), np.hstack(AllFp_S_kg))[0,1]
+# C_S = np.corrcoef(np.hstack(AllSpd_S), np.hstack(AllFp_S_kg))[0,1]
+[c_S, P_S] = stats.pearsonr(np.hstack(AllSpd_S), np.hstack(AllFp_S_kg))
 LineEq_S = 'y = ' + str(round(z_S[0],2)) + 'x + ' + str(round(z_S[1],2))
-plt1.text(2.05, 15, 'Speed Clamp', fontsize=txt, ha='right')
-plt1.text(2.05, 14, LineEq_S, fontsize=txt, ha='right')
-plt1.text(2.05, 13, 'R$^2$ = ' + str(round(C_S*C_S,3)), fontsize=txt, ha='right')
-plt1.text(0.8, 31, 'A', fontsize=fnt*2)
+plt1.text(2.0, 19, 'Speed Clamp', fontsize=txt, ha='right')
+plt1.text(2.0, 18, LineEq_S, fontsize=txt, ha='right')
+plt1.text(2.0, 17, 'R$^2$ = ' + str(round(c_S*c_S,3)), fontsize=txt, ha='right')
+plt1.text(2.0, 16, 'p < 0.001', fontsize=txt, ha='right')
+plt1.text(0.85, 31, 'A', fontsize=fnt*2)
     
 z_F = np.polyfit(np.hstack(AllSpd_F), np.hstack(AllFp_F_kg), 1)
 p_F = np.poly1d(z_F)
@@ -1271,11 +1428,13 @@ x = np.linspace(np.min(AllSpd_F), np.max(AllSpd_F), 25)
 plt1.scatter(x,p_F(x)*9.81,c='k',marker='s', s=sz2, alpha = A)
 plt1.plot(x,p_F(x)*9.81,'-k')
 # the line equation and R
-C_F = np.corrcoef(np.hstack(AllSpd_F), np.hstack(AllFp_F_kg))[0,1]
+# C_F = np.corrcoef(np.hstack(AllSpd_F), np.hstack(AllFp_F_kg))[0,1]
+[c_F, P_F] = stats.pearsonr(np.hstack(AllSpd_F), np.hstack(AllFp_F_kg))
 LineEq_F = 'y = ' + str(round(z_F[0],2)) + 'x + ' + str(round(z_F[1],2))
-plt1.text(1.02, 29, 'Fp Clamp', fontsize=txt)
-plt1.text(1.02, 28, LineEq_F, fontsize=txt)
-plt1.text(1.02, 27, 'R$^2$ = ' + str(round(C_F*C_F,3)), fontsize=txt)
+plt1.text(1.02, 29.5, 'Fp Clamp', fontsize=txt)
+plt1.text(1.02, 28.5, LineEq_F, fontsize=txt)
+plt1.text(1.02, 27.5, 'R$^2$ = ' + str(round(c_F*c_F,3)), fontsize=txt)
+plt1.text(1.02, 26.5, 'p < 0.001', fontsize=txt)
 
 plt1.set_xlabel('Walking Speed (m/s)', fontsize=fnt)
 plt1.set_xticks([1, 1.5, 2])
@@ -1299,25 +1458,25 @@ x = np.linspace(np.min(AllSpd_S), np.max(AllSpd_S), 25)
 plt2.scatter(x,p_S(x),c='k',marker='o', s=sz2, alpha = A)
 plt2.plot(x,p_S(x),'-k')
 # the line equation and R
-C_S = np.corrcoef(np.hstack(AllSpd_S), np.hstack(WAvg_S))[0,1]
+[c_S, P_S] = stats.pearsonr(np.hstack(AllSpd_S), np.hstack(WAvg_S))
 LineEq_S = 'y = ' + str(round(z_S[0],2)) + 'x + ' + str(round(z_S[1],2))
-plt2.text(2.05, 2.75, 'Speed Clamp', fontsize=txt, ha='right')
-plt2.text(2.05, 2.25, LineEq_S, fontsize=txt, ha='right')
-plt2.text(2.05, 1.75, 'R$^2$ = ' + str(round(C_S*C_S,3)), fontsize=txt, ha='right')
-plt2.text(0.8, 10, 'B', fontsize=fnt*2)
-
+plt2.text(2.0, 3, 'Speed Clamp', fontsize=txt, ha='right')
+plt2.text(2.0, 2.5, LineEq_S, fontsize=txt, ha='right')
+plt2.text(2.0, 2, 'R$^2$ = ' + str(round(c_S*c_S,3)), fontsize=txt, ha='right')
+plt2.text(2.0, 1.5, 'p < 0.001', fontsize=txt, ha='right')
+plt2.text(0.85, 10, 'B', fontsize=fnt*2)
 z_F = np.polyfit(np.hstack(AllSpd_F), np.hstack(WAvg_F), 1)
 p_F = np.poly1d(z_F)
 x = np.linspace(np.min(AllSpd_F), np.max(AllSpd_F), 25)
 plt2.scatter(x,p_F(x),c='k',marker='s', s=sz2, alpha = A)
 plt2.plot(x,p_F(x),'-k')
 # the line equation and R
-C_F = np.corrcoef(np.hstack(AllSpd_F), np.hstack(WAvg_F))[0,1]
+[c_F, P_F] = stats.pearsonr(np.hstack(AllSpd_F), np.hstack(WAvg_F))
 LineEq_F = 'y = ' + str(round(z_F[0],2)) + 'x + ' + str(round(z_F[1],2))
 plt2.text(1.02, 9, 'Fp Clamp', fontsize=txt)
 plt2.text(1.02, 8.5, LineEq_F, fontsize=txt)
-plt2.text(1.02, 8, 'R$^2$ = ' + str(round(C_F*C_F,3)), fontsize=txt)
-
+plt2.text(1.02, 8, 'R$^2$ = ' + str(round(c_F*c_F,3)), fontsize=txt)
+plt2.text(1.02, 7.5, 'p < 0.001', fontsize=txt)
 plt2.set_xlabel('Walking Speed (m/s)', fontsize=fnt)
 plt2.set_xticks([1, 1.5, 2])
 plt2.set_ylabel('Net Metabolic Power (W/kg)', fontsize=fnt)
@@ -1332,38 +1491,7 @@ for i in range(5):
                 c=Colors[i], marker='o', s=sz)
     plt3.scatter(AllSpd_F[:,i], CoT_Fp_F[:,i], 
                 c=Colors[i], marker='s', s=sz)
-    
-# calculate trendlines
-# z_S = np.polyfit(np.hstack(AllSpd_S), np.hstack(CoT_Fp_S), 1)
-# p_S = np.poly1d(z_S)
-# x = np.linspace(np.min(AllSpd_S), np.max(AllSpd_S), 25)
-# plt3.scatter(x,p_S(x),c='k',marker='o', s=sz2, alpha = A)
-# plt3.plot(x,p_S(x),'-k')
-# # the line equation and R
-# C_S = np.corrcoef(np.hstack(AllSpd_S), np.hstack(CoT_Fp_S))[0,1]
-# LineEq_S = 'y = ' + str(round(z_S[0],2)) + 'x + ' + str(round(z_S[1],2))
-# plt3.text(1.6, 2.0, 'Speed Clamp', fontsize=txt)
-# plt3.text(1.6, 1.7, LineEq_S, fontsize=txt)
-# plt3.text(1.6, 1.4, 'R$^2$ = ' + str(round(C_S*C_S,3)), fontsize=txt)
-# plt3.text(0.8, 6, 'C', fontsize=fnt*2)
 
-# z_F = np.polyfit(np.hstack(AllSpd_F), np.hstack(CoT_Fp_F), 1)
-# p_F = np.poly1d(z_F)
-# x = np.linspace(np.min(AllSpd_F), np.max(AllSpd_F), 25)
-# plt3.scatter(x,p_F(x),c='k',marker='s', s=sz2, alpha = A)
-# plt3.plot(x,p_F(x),'-k')
-# # the line equation and R
-# C_F = np.corrcoef(np.hstack(AllSpd_F), np.hstack(CoT_Fp_F))[0,1]
-# LineEq_F = 'y = ' + str(round(z_F[0],2)) + 'x + ' + str(round(z_F[1],2))
-# plt3.text(1.02, 5.5, 'Fp Clamp', fontsize=txt)
-# plt3.text(1.02, 5.2, LineEq_F, fontsize=txt)
-# plt3.text(1.02, 4.9, 'R$^2$ = ' + str(round(C_F*C_F,3)), fontsize=txt)
-
-# plt3.set_xlabel('Walking Speed (m/s)', fontsize=fnt)
-# plt3.set_xticks([1, 1.5, 2])
-# plt3.set_ylabel('Cost of Transport (J/kg/m)', fontsize=fnt)
-# # plt3.set_yticks([2, 4, 6, 8])
-# plt3.tick_params(axis='y', labelsize=fnt) 
 
 z_S = np.polyfit(np.hstack(AllSpd_S), np.hstack(CoT_Fp_S), 2)
 p_S = np.poly1d(z_S)
@@ -1385,11 +1513,13 @@ def polyfit(x, y, degree):
     return results
 
 R = polyfit(np.hstack(AllSpd_S), np.hstack(CoT_Fp_S), 2)
+[c_S, P_S] = stats.pearsonr(np.hstack(AllSpd_S), np.hstack(CoT_Fp_S))
 LineEq_S = 'y = ' + str(round(z_S[0],2)) + 'x$^2$ + ' + str(round(z_S[1],2)) + 'x + ' + str(round(z_S[2],2))
-plt3.text(2.05, 2.0, 'Speed Clamp', fontsize=txt, ha='right')
-plt3.text(2.05, 1.7, LineEq_S, fontsize=txt, ha='right')
-plt3.text(2.05, 1.4, 'R$^2$ = ' + str(round(R['r_squared'], 3)), fontsize=txt, ha='right')
-plt3.text(0.8, 6, 'C', fontsize=fnt*2)
+plt3.text(2.0, 2.25, 'Speed Clamp', fontsize=txt, ha='right')
+plt3.text(2.0, 2, LineEq_S, fontsize=txt, ha='right')
+plt3.text(2.0, 1.75, 'R$^2$ = ' + str(round(R['r_squared'], 3)), fontsize=txt, ha='right')
+plt3.text(2.0, 1.5, 'p < 0.001', fontsize=txt, ha='right')
+plt3.text(0.85, 6.2, 'C', fontsize=fnt*2)
 
 z_F = np.polyfit(np.hstack(AllSpd_F), np.hstack(CoT_Fp_F), 2)
 p_F = np.poly1d(z_F)
@@ -1398,16 +1528,17 @@ plt3.scatter(x,p_F(x),c='k',marker='s', s=sz2, alpha = A)
 plt3.plot(x,p_F(x),'-k')
 # the line equation and R
 R = polyfit(np.hstack(AllSpd_F), np.hstack(CoT_Fp_F), 2)
-# LineEq_F = 'y = ' + str(round(z_F[0],2)) + 'x + ' + str(round(z_F[1],2))
+[c_F, P_F] = stats.pearsonr(np.hstack(AllSpd_F), np.hstack(CoT_Fp_F))
 LineEq_F = 'y = ' + str(round(z_F[0],2)) + 'x$^2$ + ' + str(round(z_F[1],2)) + 'x + ' + str(round(z_F[2],2))
-plt3.text(1.02, 5.5, 'Fp Clamp', fontsize=txt)
-plt3.text(1.02, 5.2, LineEq_F, fontsize=txt)
-plt3.text(1.02, 4.9, 'R$^2$ = ' + str(round(R['r_squared'],3)), fontsize=txt)
+plt3.text(1.02, 5.8, 'Fp Clamp', fontsize=txt)
+plt3.text(1.02, 5.5, LineEq_F, fontsize=txt)
+plt3.text(1.02, 5.2, 'R$^2$ = ' + str(round(R['r_squared'],3)), fontsize=txt)
+plt3.text(1.02, 4.9, 'p < 0.001', fontsize=txt)
 
 plt3.set_xlabel('Walking Speed (m/s)', fontsize=fnt)
 plt3.set_xticks([1, 1.5, 2])
 plt3.set_ylabel('Cost of Transport (J/kg/m)', fontsize=fnt)
-# plt3.set_yticks([2, 4, 6, 8])
+plt3.set_yticks([2, 3, 4, 5, 6])
 plt3.tick_params(axis='y', labelsize=fnt) 
 
 
@@ -1426,12 +1557,14 @@ x = np.linspace(np.min(AllFp_S_kg)*9.81, np.max(AllFp_S_kg)*9.81, 25)
 plt5.scatter(x,p_S(x),c='k',marker='o', s=sz2, alpha = A)
 plt5.plot(x,p_S(x),'-k')
 # the line equation and R
-C_S = np.corrcoef(np.hstack(AllFp_S_kg)*9.81, np.hstack(WAvg_S))[0,1]
+# C_S = np.corrcoef(np.hstack(AllFp_S_kg)*9.81, np.hstack(WAvg_S))[0,1]
+[c_S, P_S] = stats.pearsonr(np.hstack(AllFp_S_kg*9.81), np.hstack(WAvg_S))
 LineEq_S = 'y = ' + str(round(z_S[0],2)) + 'x + ' + str(round(z_S[1],2))
-plt5.text(30.5, 2.5, 'Speed Clamp', fontsize=txt, ha='right')
-plt5.text(30.5, 2, LineEq_S, fontsize=txt, ha='right')
-plt5.text(30.5, 1.5, 'R$^2$ = ' + str(round(C_S*C_S,3)), fontsize=txt, ha='right')
-plt5.text(10, 10, 'D', fontsize=fnt*2)
+plt5.text(30, 3, 'Speed Clamp', fontsize=txt, ha='right')
+plt5.text(30, 2.5, LineEq_S, fontsize=txt, ha='right')
+plt5.text(30, 2, 'R$^2$ = ' + str(round(c_S*c_S,3)), fontsize=txt, ha='right')
+plt5.text(30, 1.5, 'p < 0.001', fontsize=txt, ha='right')
+plt5.text(13.5, 9.7, 'D', fontsize=fnt*2)
 
 z_F = np.polyfit(np.hstack(AllFp_F_kg)*9.81, np.hstack(WAvg_F), 1)
 p_F = np.poly1d(z_F)
@@ -1439,11 +1572,13 @@ x = np.linspace(np.min(AllFp_F_kg)*9.81, np.max(AllFp_F_kg)*9.81, 25)
 plt5.scatter(x,p_F(x),c='k',marker='s', s=sz2, alpha = A)
 plt5.plot(x,p_F(x),'-k')
 # the line equation and R
-C_F = np.corrcoef(np.hstack(AllFp_F_kg)*9.81, np.hstack(WAvg_F))[0,1]
+# C_F = np.corrcoef(np.hstack(AllFp_F_kg)*9.81, np.hstack(WAvg_F))[0,1]
+[c_F, P_F] = stats.pearsonr(np.hstack(AllFp_F_kg*9.81), np.hstack(WAvg_F))
 LineEq_F = 'y = ' + str(round(z_F[0],2)) + 'x + ' + str(round(z_F[1],2))
-plt5.text(13, 9, 'Fp Clamp', fontsize=txt)
-plt5.text(13, 8.4, LineEq_F, fontsize=txt)
-plt5.text(13, 7.8, 'R$^2$ = ' + str(round(C_F*C_F,3)), fontsize=txt)
+plt5.text(15.5, 9, 'Fp Clamp', fontsize=txt)
+plt5.text(15.5, 8.5, LineEq_F, fontsize=txt)
+plt5.text(15.5, 8, 'R$^2$ = ' + str(round(c_F*c_F,3)), fontsize=txt)
+plt5.text(15.5, 7.5, 'p < 0.001', fontsize=txt)
 
 plt5.set_xlabel('Fp (% body weight)', fontsize=fnt)
 # plt5.set_xticks([1, 1.5, 2])
@@ -1468,12 +1603,13 @@ plt6.scatter(x,p_S(x),c='k',marker='o', s=sz2, alpha = A)
 plt6.plot(x,p_S(x),'-k')
 # the line equation and R
 R = polyfit(np.hstack(AllFp_S_kg)*9.81, np.hstack(CoT_Fp_S), 2)
-# C_S = np.corrcoef(np.hstack(AllFp_S_kg)*9.81, np.hstack(CoT_Fp_S))[0,1]
-LineEq_S = 'y = ' + str(round(z_S[0],2)) + 'x + ' + str(round(z_S[1],2))
-plt6.text(30.5, 2, 'Speed Clamp', fontsize=txt, ha='right')
-plt6.text(30.5, 1.7, LineEq_S, fontsize=txt, ha='right')
-plt6.text(30.5, 1.4, 'R$^2$ = ' + str(round(R['r_squared'],3)), fontsize=txt, ha='right')
-plt6.text(10, 6, 'E', fontsize=fnt*2)
+[c_S, P_S] = stats.pearsonr(np.hstack(AllFp_S*9.81), np.hstack(CoT_Fp_S))
+LineEq_S = 'y = ' + str(round(z_S[0],2)) + 'x$^2$ + ' + str(round(z_S[1],2)) + 'x + ' + str(round(z_S[2],2))
+plt6.text(30, 2.3, 'Speed Clamp', fontsize=txt, ha='right')
+plt6.text(30, 2, LineEq_S, fontsize=txt, ha='right')
+plt6.text(30, 1.7, 'R$^2$ = ' + str(round(R['r_squared'],3)), fontsize=txt, ha='right')
+plt6.text(30, 1.4, 'p < 0.001', fontsize=txt, ha='right')
+plt6.text(13.5, 6.2, 'E', fontsize=fnt*2)
 
 z_F = np.polyfit(np.hstack(AllFp_F_kg)*9.81, np.hstack(CoT_Fp_F), 2)
 p_F = np.poly1d(z_F)
@@ -1482,16 +1618,18 @@ plt6.scatter(x,p_F(x),c='k',marker='s', s=sz2, alpha = A)
 plt6.plot(x,p_F(x),'-k')
 # the line equation and R
 R = polyfit(np.hstack(AllFp_F_kg)*9.81, np.hstack(CoT_Fp_F), 2)
+[c_F, P_F] = stats.pearsonr(np.hstack(AllFp_F*9.81), np.hstack(CoT_Fp_F))
 # C_F = np.corrcoef(np.hstack(AllFp_F_kg)*9.81, np.hstack(CoT_Fp_F))[0,1]
-LineEq_F = 'y = ' + str(round(z_F[0],2)) + 'x + ' + str(round(z_F[1],2))
-plt6.text(13, 5.5, 'Fp Clamp', fontsize=txt)
-plt6.text(13, 5.2, LineEq_F, fontsize=txt)
-plt6.text(13, 4.9, 'R$^2$ = ' + str(round(R['r_squared'], 3)), fontsize=txt)
+LineEq_F = 'y = ' + str(round(z_F[0],2)) + 'x$^2$ + ' + str(round(z_F[1],2)) + 'x + ' + str(round(z_F[2],2))
+plt6.text(15.5, 5.8, 'Fp Clamp', fontsize=txt)
+plt6.text(15.5, 5.5, LineEq_F, fontsize=txt)
+plt6.text(15.5, 5.2, 'R$^2$ = ' + str(round(R['r_squared'], 3)), fontsize=txt)
+plt6.text(15.5, 4.9, 'p < 0.001', fontsize=txt)
 
 plt6.set_xlabel('Fp (% body weight)', fontsize=fnt)
 # plt6.set_xticks([1, 1.5, 2])
 plt6.set_ylabel('Cost of Transport (J/kg/m)', fontsize=fnt)
-# plt6.set_yticks([2, 4, 6, 8])
+plt6.set_yticks([2, 3, 4, 5, 6])
 plt6.tick_params(axis='y', labelsize=fnt) 
 
 # legend
