@@ -3,7 +3,7 @@ Data files and processing script for Speed-Fp Clamp Project
 
 
 Data files were too large for GitHub, so you can download all data files at the following google drive folder:
-https://drive.google.com/file/d/1PrpgwxUbaDNYojghtbIORW3qLK66NI31/view?usp=sharing
+https://drive.google.com/drive/folders/1-u74AgFj0rZDlK9dtHf0nTUbUMXmFZLc?usp=sharing
 
 ## Run Analysis & Generate Figures
 To run our data processing, all you need to do is: 
